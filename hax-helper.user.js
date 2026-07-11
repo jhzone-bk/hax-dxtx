@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         HAX Data Helper
 // @namespace    https://hax.co.id/
-// @version      5.3.0
-// @description  一键获取 HAX_DATA：GM_cookie 自动跨域读 stel_* + PHPSESSID，失败则手动粘贴（不落盘）
+// @version      5.4.0
+// @description  一键获取 HAX_DATA：stel_* 取自 oauth.telegram.org，PHPSESSID 直读，全自动/手动兜底
 // @author       You
 // @match        https://hax.co.id/*
 // @grant        GM_cookie
@@ -11,7 +11,7 @@
 
 (function() {
     'use strict';
-    console.log('[HAX] v5.3 启动');
+    console.log('[HAX] v5.4 启动');
 
     function m(v){ return (!v||v.length<=8)?'****':v.slice(0,4)+'****'+v.slice(-2); }
     function esc(s){ var d=document.createElement('div');d.textContent=s||'';return d.innerHTML; }
@@ -44,10 +44,10 @@
 
         '<div style="background:#16161e;border-radius:10px;padding:12px;margin-bottom:12px">' +
             '<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #222">' +
-                '<span style="color:#7aa2f7;font-weight:600">stel_token</span>' +
+                '<span style="color:#7aa2f7;font-weight:600">stel_token <span style="color:#555;font-weight:400;font-size:10px">(TG)</span></span>' +
                 '<span id="stok" style="font-family:monospace;font-size:11.5px;color:#e0af68">⏳ 检测中</span></div>' +
             '<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #222">' +
-                '<span style="color:#7aa2f7;font-weight:600">stel_ssid</span>' +
+                '<span style="color:#7aa2f7;font-weight:600">stel_ssid <span style="color:#555;font-weight:400;font-size:10px">(TG)</span></span>' +
                 '<span id="sssid" style="font-family:monospace;font-size:11.5px;color:#e0af68">⏳ 检测中</span></div>' +
             '<div style="display:flex;justify-content:space-between;padding:5px 0">' +
                 '<span style="color:#7aa2f7;font-weight:600">PHPSESSID</span>' +
@@ -55,7 +55,7 @@
         '</div>' +
 
         '<div style="margin-bottom:12px">' +
-            '<div id="hint" style="font-size:11.5px;color:#e0af68;margin-bottom:8px;display:flex;align-items:center;gap:4px">📋 正在尝试自动读取 stel_* …</div>' +
+            '<div id="hint" style="font-size:11.5px;color:#e0af68;margin-bottom:8px;display:flex;align-items:center;gap:4px">📋 正在从 oauth.telegram.org 读取 stel_* …</div>' +
             '<div style="display:flex;flex-direction:column;gap:6px">' +
                 '<div style="display:flex;gap:6px;align-items:center">' +
                     '<span style="color:#7aa2f7;font-size:11.5px;font-weight:600;min-width:80px">stel_token</span>' +
@@ -92,7 +92,7 @@
         '</div>' +
 
         '<div id="msg" style="display:none;margin-top:10px;padding:8px 12px;border-radius:8px;font-size:12px;text-align:center"></div>' +
-        '<div style="color:#333;font-size:10px;text-align:center;margin-top:10px">v5.3 · GM_cookie 自动读（失败则手动）</div>';
+        '<div style="color:#333;font-size:10px;text-align:center;margin-top:10px">v5.4 · stel 取自 oauth.telegram.org</div>';
 
     document.body.appendChild(box);
 
@@ -120,7 +120,7 @@
         else if (ck.PHPSESSID){ badge.textContent='⚠️ 需补 stel'; badge.style.background='#2a2510'; badge.style.color='#e0af68'; }
         else { badge.textContent='❌ 未登录'; badge.style.background='#2a1a1a'; badge.style.color='#f7768e'; }
 
-        document.getElementById('hint').textContent = hasStel ? '✅ 已就绪，可直接复制/推送' : '📋 若未自动读取，请手动粘贴 stel_*（F12→Application→Cookies）';
+        document.getElementById('hint').textContent = hasStel ? '✅ 已就绪，可直接复制/推送' : '📋 若未自动读取，请手动粘贴 stel_*（来自 oauth.telegram.org）';
         document.getElementById('hint').style.color = hasStel ? '#9ece6a' : '#e0af68';
     }
 
@@ -170,27 +170,31 @@
 
     refresh();
 
-    // ====== 用 GM_cookie 跨全部域名抓 stel ======
+    // ====== 用 GM_cookie 从 oauth.telegram.org 读 stel（Telegram 登录 OAuth 域） ======
     console.log('[HAX] GM_cookie:', typeof GM_cookie);
+    var stelDomains = ['oauth.telegram.org', 'telegram.org', '.telegram.org'];
     if (typeof GM_cookie !== 'undefined' && GM_cookie.list) {
-        try {
-            GM_cookie.list({}, function(all, err){
-                if (err) { console.log('[HAX] GM_cookie err', err); refresh(); return; }
-                (all||[]).forEach(function(c){
-                    if (c.name === 'stel_token') auto.stel_token = c.value;
-                    if (c.name === 'stel_ssid') auto.stel_ssid = c.value;
+        stelDomains.forEach(function(dom){
+            try {
+                GM_cookie.list({domain: dom}, function(all, err){
+                    if (!err && all) {
+                        all.forEach(function(c){
+                            if (c.name === 'stel_token') auto.stel_token = c.value;
+                            if (c.name === 'stel_ssid') auto.stel_ssid = c.value;
+                        });
+                    }
+                    console.log('[HAX] 域', dom, 'stel:', !!auto.stel_token, !!auto.stel_ssid);
+                    // 预填输入框（用户可改）
+                    if (auto.stel_token) document.getElementById('htok').value = auto.stel_token;
+                    if (auto.stel_ssid)  document.getElementById('hssid').value = auto.stel_ssid;
+                    refresh();
                 });
-                console.log('[HAX] 自动 stel:', !!auto.stel_token, !!auto.stel_ssid);
-                // 预填输入框（用户可改）
-                if (auto.stel_token) document.getElementById('htok').value = auto.stel_token;
-                if (auto.stel_ssid)  document.getElementById('hssid').value = auto.stel_ssid;
-                refresh();
-            });
-        } catch(e){ console.log('[HAX] GM_cookie 异常', e.message); refresh(); }
+            } catch(e){ console.log('[HAX] GM_cookie 异常', dom, e.message); }
+        });
     } else {
         console.log('[HAX] GM_cookie 不可用，走手动');
         refresh();
     }
 
-    console.log('[HAX] ✅ v5.3 就绪');
+    console.log('[HAX] ✅ v5.4 就绪');
 })();
