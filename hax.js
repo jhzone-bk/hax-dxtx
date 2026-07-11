@@ -171,8 +171,8 @@ async function barkPush(key, title, content) {
 
 // ---------- 主流程 ----------
 async function main() {
-  const raw = process.env.HAX_DATA;
-  const barkKey = process.env.BARK_KEY;
+  const raw = process.env.HAX_DATA || process.env.hax_data;
+  const barkKey = process.env.BARK_KEY || process.env.bark_key;
 
   log('🔔 Hax监控, 开始!');
 
