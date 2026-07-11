@@ -15,6 +15,11 @@
  *
  * 续期提醒：当任意 VPS 距到期 ≤ 48 小时（默认 2 天，可用 TG_WARN_DAYS 覆盖），
  *           自动通过 Telegram 发送「主机续期提醒」（不截图，避免无头浏览器触发人机验证）。
+ *
+ * 会话自动刷新：当 PHPSESSID / stel_ssid 过期导致 302→login 时，
+ *               脚本会自动用 # 前的 stel_token 身份重新访问站点，
+ *               让服务端下发新的 PHPSESSID（甚至 stel_ssid），实现自动续命。
+ *               只有 stel_token 也过期时才需要手动重新登录。
  **************************************/
 
 'use strict';
@@ -145,6 +150,69 @@ function serializeCookies(map) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// ---------- 会话自动刷新 ----------
+// 当检测到 302→login / 会话失效时，尝试用稳定的 stel_token+stel_ssid 身份
+// 让服务端重新颁发 PHPSESSID（甚至 stel_ssid），实现自动续命。
+// 返回 { ok, cookies } 或 { ok:false }
+
+function extractIdentityCookies(accountStr) {
+  // HAX_DATA 格式：stel_token=XX; stel_ssid=XX #PHPSESSID=XX;
+  // # 之前的是 TG OAuth 身份（相对稳定），之后的是 hax 会话（易过期）
+  const beforeHash = accountStr.split('#')[0];
+  if (!beforeHash) return null;
+  const map = parseCookieString(beforeHash);
+  // 至少要有 stel_token 才能尝试刷新
+  if (map.stel_token) return map;
+  return null;
+}
+
+async function refreshSession(identityCookies, originalHeaders) {
+  // 用 stel_token(+stel_ssid) 访问首页，让服务端下发新会话
+  log('[刷新] 尝试用 stel_token 自动获取新会话...');
+  const headers = { ...originalHeaders };
+  headers.Cookie = serializeCookies(identityCookies);
+
+  try {
+    const res = await fetch(BASE + '/vps-info/', { headers, redirect: 'manual' });
+    const body = await res.text();
+
+    // 收集服务端下发的所有新 cookie
+    const newMap = { ...identityCookies };
+    const setCookie = res.headers.get('set-cookie');
+    if (setCookie) {
+      for (const part of setCookie.split(',')) {
+        const m = part.match(/([^=;\s]+)=([^;]+)/);
+        if (m) newMap[m[1]] = m[2];
+      }
+    }
+
+    // 检查这次是否还跳 login
+    const stillLogin =
+      res.status === 302 ||
+      res.headers.get('location')?.includes('/login') ||
+      /<title>Login/i.test(body) ||
+      body.includes('Please login');
+
+    if (stillLogin) {
+      log('[刷新] ❌ stel_token 也已过期，无法自动刷新。需要手动重新登录获取新凭证。');
+      return { ok: false };
+    }
+
+    // 检查是否拿到了新 cookie
+    const gotNewPHPSESSID = !!newMap.PHPSESSID || !!newMap.phpsessid;
+    if (gotNewPHPSESSID || !isWaitingPage(body)) {
+      log(`[刷新] ✅ 成功获取新会话 (PHPSESSID=${newMap.PHPSESSID ? '有' : '无'}, stel_ssid=${newMap.stel_ssid ? identityCookies.stel_ssid !== newMap.stel_ssid ? '已更新' : '未变' : '无'})`);
+      return { ok: true, cookies: newMap };
+    }
+
+    log('[刷新] ⚠️ 未收到有效会话 cookie，可能被 Cloudflare 拦截。');
+    return { ok: false };
+  } catch (e) {
+    log(`[刷新] 网络异常: ${e.message}`);
+    return { ok: false };
+  }
+}
+
 // 判断是否为 hax.co.id 的「请稍候…」验证闸门页
 function isWaitingPage(body) {
   return (
@@ -198,17 +266,84 @@ async function checkAccount(accountStr, index) {
       }
     }
 
-    // 未登录判定
+    // 未登录判定 → 尝试自动刷新
     const isLoginPage =
       res.status === 302 ||
       res.headers.get('location')?.includes('/login') ||
       /<title>Login/i.test(body) ||
       /meta http-equiv="refresh"[^>]*\/login/i.test(body) ||
       body.includes('Please login');
+
     if (isLoginPage) {
-      log('[提醒] 会话已失效，PHPSESSID 需要重新抓取（或 stel cookie 已过期）。');
-      log('        请重新从 https://hax.co.id/vps-info/ 抓取 PHPSESSID 更新 HAX_DATA。');
-      return { index, ok: false, expired: true };
+      // 尝试用 stel_token 身份自动刷新
+      const identity = extractIdentityCookies(accountStr);
+      if (identity) {
+        const refreshResult = await refreshSession(identity, headers);
+        if (refreshResult.ok) {
+          // 刷新成功：用新 cookie 重试 vps-info 查询（最多再试 3 次）
+          log('[刷新] 用新会话重新查询 VPS 信息...');
+          Object.assign(cookies, refreshResult.cookies);
+          for (let retry = 1; retry <= 3; retry++) {
+            headers.Cookie = serializeCookies(cookies);
+            try {
+              res = await fetch(VPS_URL, { headers, redirect: 'manual' });
+            } catch (e) {
+              log(`[刷新重试] 请求失败: ${e.message}`);
+              break;
+            }
+            body = await res.text();
+
+            // 再次合并 Set-Cookie
+            const setCookie2 = res.headers.get('set-cookie');
+            if (setCookie2) {
+              for (const part of setCookie2.split(',')) {
+                const m = part.match(/([^=;\s]+)=([^;]+)/);
+                if (m) cookies[m[1]] = m[2];
+              }
+            }
+
+            const stillLogin =
+              res.status === 302 ||
+              res.headers.get('location')?.includes('/login') ||
+              /<title>Login/i.test(body) ||
+              body.includes('Please login');
+            if (stillLogin) {
+              log(`[刷新重试] ${retry}/3 仍然未登录`);
+              if (retry < 3) { await sleep(3000); continue; }
+              log('[提醒] 自动刷新后仍无法登录，stel_token 已完全过期。请重新登录 hax.co.id 并更新 HAX_DATA。');
+              return { index, ok: false, expired: true };
+            }
+
+            items = parseExpiry(body);
+            if (!isWaitingPage(body) && items.length > 0) {
+              log('[刷新重试] ✅ 刷新成功，已获取 VPS 数据');
+              break; // 成功！跳出重试循环继续往下走
+            }
+
+            if (retry < 3) {
+              log(`[刷新重试] ${retry}/3 页面数据不完整，等待重试...`);
+              await sleep(3000);
+            }
+          }
+          // 如果刷新后拿到了数据就直接跳到结果输出（不再走下面的原始失败逻辑）
+          if (items.length > 0) {
+            // 继续往下走到 lines 输出部分
+          } else {
+            log('[提醒] 刷新会话成功但仍无法解析到期数据。');
+            return { index, ok: false, noData: true };
+          }
+        } else {
+          // 刷新也失败了
+          log('[提醒] 会话已失效且自动刷新失败（stel_token 可能已过期）。');
+          log('        请重新从 https://hax.co.id 登录并更新 HAX_DATA 中的凭证。');
+          return { index, ok: false, expired: true };
+        }
+      } else {
+        // 连 stel_token 都没有
+        log('[提醒] 会话已失效，HAX_DATA 中未找到 stel_token 无法自动刷新。');
+        log('        请重新配置 HAX_DATA。');
+        return { index, ok: false, expired: true };
+      }
     }
 
     items = parseExpiry(body);
