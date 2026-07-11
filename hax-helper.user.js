@@ -73,26 +73,27 @@
           position: fixed;
           ${CONFIG.position.includes('top') ? 'top: 10px' : 'bottom: 10px'};
           ${CONFIG.position.includes('right') ? 'right: 10px' : 'left: 10px'};
-          z-index: 999999;
+          z-index: 2147483647;
           font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
           font-size: 13px;
           color: #e0e0e0;
           user-select: none;
         }
         #hax-toggle {
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          background: linear-gradient(135deg, #ff6b6b, #ee5a24);
           color: white;
           border: none;
-          padding: 8px 14px;
-          border-radius: 20px;
+          padding: 10px 18px;
+          border-radius: 25px;
           cursor: pointer;
-          font-size: 13px;
-          font-weight: 600;
-          box-shadow: 0 2px 10px rgba(102,126,234,0.4);
+          font-size: 14px;
+          font-weight: 700;
+          box-shadow: 0 4px 15px rgba(238,90,36,0.6), 0 0 30px rgba(238,90,36,0.3);
           transition: transform 0.15s, box-shadow 0.15s;
           display: flex;
           align-items: center;
-          gap: 5px;
+          gap: 6px;
+          animation: haxPulse 2s infinite;
         }
         #hax-toggle:hover { transform: scale(1.05); box-shadow: 0 4px 16px rgba(102,126,234,0.5); }
         #hax-body {
@@ -131,6 +132,10 @@
         .hax-status-ok { background: #1a4731; color: #55efc4; }
         .hax-status-err { background: #5a1a1a; color: #ff7675; }
         @keyframes haxFadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes haxPulse {
+          0% { box-shadow: 0 4px 15px rgba(238,90,36,0.6), 0 0 30px rgba(238,90,36,0.3); }
+          50% { box-shadow: 0 4px 25px rgba(238,90,36,0.9), 0 0 50px rgba(238,90,36,0.5); transform: scale(1.05); }
+          100% { box-shadow: 0 4px 15px rgba(238,90,36,0.6), 0 0 30px rgba(238,90,36,0.3); }
         .hax-cookie-item { display: flex; justify-content: space-between; align-items: center; padding: 3px 0; font-size: 11.5px; }
         .hax-cookie-name { color: #89b4fa; font-weight: 600; min-width: 85px; }
         .hax-cookie-val { color: #a6adc8; font-family: monospace; }
@@ -367,7 +372,9 @@
 
   // ========== 初始化 ==========
   function init() {
+    console.log('[HAX Helper] 初始化...');
     createUI();
+    console.log('[HAX Helper] UI 已创建，面板 ID:', document.getElementById('hax-helper-panel')?.id || 'NOT FOUND');
 
     const toggle = document.getElementById('hax-toggle');
     const body = document.getElementById('hax-body');
