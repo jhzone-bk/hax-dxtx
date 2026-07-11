@@ -1,19 +1,21 @@
 // ==UserScript==
 // @name         HAX Data Helper
 // @namespace    https://hax.co.id/
-// @version      5.5.0
+// @version      5.6.0
 // @description  一键获取 HAX_DATA：stel_* 取自 telegram.org（需 @match 授权），PHPSESSID 直读，全自动/手动兜底
 // @author       You
 // @match        https://hax.co.id/*
 // @match        https://telegram.org/*
 // @match        https://*.telegram.org/*
 // @grant        GM_cookie
+// @grant        GM_xmlhttpRequest
+// @connect      api.github.com
 // @run-at       document-idle
 // ==/UserScript==
 
 (function() {
     'use strict';
-    console.log('[HAX] v5.5 启动');
+    console.log('[HAX] v5.6 启动');
 
     // 仅在 hax.co.id 上显示面板；telegram.org 的 @match 只为授予 GM_cookie 读取权限
     if (location.hostname.indexOf('hax.co.id') === -1) return;
@@ -97,7 +99,7 @@
         '</div>' +
 
         '<div id="msg" style="display:none;margin-top:10px;padding:8px 12px;border-radius:8px;font-size:12px;text-align:center"></div>' +
-        '<div style="color:#333;font-size:10px;text-align:center;margin-top:10px">v5.4 · stel 取自 oauth.telegram.org</div>';
+        '<div style="color:#333;font-size:10px;text-align:center;margin-top:10px">v5.6 · GM_xmlhttpRequest 推送（绕过 CORS）</div>';
 
     document.body.appendChild(box);
 
@@ -145,24 +147,55 @@
         setTimeout(function(){el.style.display='none'},4000); }
     function doPush(){ var t=document.getElementById('htxt').textContent; if(!t||t.length<10){show('err','⚠️ 无数据');return;}
         document.getElementById('pz').style.display=''; document.getElementById('ght').focus(); show('info','填入 PAT 后确认'); }
+    // GitHub API 封装：用 GM_xmlhttpRequest 绕过浏览器 CORS
+    function ghReq(method, url, ght, bodyObj, cb){
+        var headers = {'Authorization':'token '+ght, 'Accept':'application/vnd.github.v3+json'};
+        if (bodyObj) headers['Content-Type'] = 'application/json';
+        GM_xmlhttpRequest({
+            method: method, url: url, headers: headers,
+            data: bodyObj ? JSON.stringify(bodyObj) : undefined,
+            onload: function(r){ cb(r.status, r.responseText, r.responseHeaders||''); },
+            onerror: function(e){ cb(0, '网络错误: ' + (e.error||'unknown')); }
+        });
+    }
+    // 用 RSA-OAEP(SHA-1) 加密（GitHub Actions Secrets 要求）
+    function encryptSecret(plain, kd){
+        var pem = kd.key.replace(/-----[^]*-----/g,'').replace(/\s/g,'');
+        var bin = atob(pem), der = new Uint8Array(bin.length), i;
+        for (i=0;i<bin.length;i++) der[i] = bin.charCodeAt(i);
+        return crypto.subtle.importKey('spki', der.buffer, {name:'RSA-OAEP', hash:'SHA-1'}, false, ['encrypt'])
+            .then(function(ck2){ return crypto.subtle.encrypt({name:'RSA-OAEP'}, ck2, new TextEncoder().encode(plain)); })
+            .then(function(enc){
+                var ea = new Uint8Array(enc), bs=''; for (var j=0;j<ea.length;j++) bs += String.fromCharCode(ea[j]);
+                return { encrypted_value: btoa(bs), key_id: kd.key_id };
+            });
+    }
     async function execPush(){
         var t=document.getElementById('htxt').textContent, ght=document.getElementById('ght').value.trim(), ghr=document.getElementById('ghr').value.trim();
-        if(!ght){show('err','❌ 填 PAT');return;} show('info','⏳ 推送中...');
-        try{
-            var p=ghr.split('/');
-            var kr=await fetch('https://api.github.com/repos/'+p[0]+'/'+p[1]+'/actions/secrets/public-key',{headers:{'Authorization':'token '+ght,'Accept':'application/vnd.github.v3+json'}});
-            if(!kr.ok)throw new Error('公钥 HTTP '+kr.status);
-            var kd=await kr.json(),pem=kd.key.replace(/-----[^]*-----/g,'').replace(/\n/g,'');
-            var der=new Uint8Array(atob(pem).length),i;for(i=0;i<der.length;i++)der[i]=atob(pem).charCodeAt(i);
-            var ck2=await crypto.subtle.importKey('spki',der.buffer,{name:'RSA-OAEP',hash:'SHA-1'},false,['encrypt']);
-            var enc=await crypto.subtle.encrypt({name:'RSA-OAEP'},ck2,new TextEncoder().encode(t));
-            var ea=new Uint8Array(enc),bs='';for(var j=0;j<ea.length;j++)bs+=String.fromCharCode(ea[j]);
-            var pr=await fetch('https://api.github.com/repos/'+p[0]+'/'+p[1]+'/actions/secrets/HAX_DATA',{method:'PUT',
-                headers:{'Authorization':'token '+ght,'Accept':'application/vnd.github.v3+json','Content-Type':'application/json'},
-                body:JSON.stringify({encrypted_value:btoa(bs),key_id:kd.key_id})});
-            if(pr.status===201||pr.status===204){ show('ok','✅ 推送成功!'); document.getElementById('pz').style.display='none'; }
-            else{var eb='';try{eb=await pr.text();}catch(e){}throw new Error(pr.status+' '+eb.slice(0,60));}
-        }catch(e){show('err','❌ '+e.message);}
+        if(!t||t.length<10){show('err','⚠️ 无数据');return;}
+        if(!ght){show('err','❌ 请先填 PAT');return;}
+        var p=ghr.split('/'); if(p.length!==2){show('err','❌ 仓库格式应为 owner/repo');return;}
+        show('info','⏳ 验证 token ...');
+        ghReq('GET','https://api.github.com/user',ght,null,function(s,body,hdrs){
+            if(s!==200){ show('err','❌ token 无效或过期 (HTTP '+s+')'); return; }
+            var scope=''; try{ hdrs.split(/\r?\n/).forEach(function(h){ if(/^x-oauth-scopes/i.test(h)) scope=h.split(':')[1].trim(); }); }catch(e){}
+            console.log('[HAX] token scope:', scope);
+            show('info','⏳ 读取仓库公钥 ...');
+            ghReq('GET','https://api.github.com/repos/'+p[0]+'/'+p[1]+'/actions/secrets/public-key',ght,null,function(s2,b2){
+                if(s2!==200){ show('err','❌ 取公钥失败 (HTTP '+s2+')：仓库不存在 / 无权限'); return; }
+                var kd; try{ kd=JSON.parse(b2); }catch(e){ show('err','❌ 公钥解析失败'); return; }
+                encryptSecret(t, kd).then(function(payload){
+                    show('info','⏳ 推送 Secret ...');
+                    ghReq('PUT','https://api.github.com/repos/'+p[0]+'/'+p[1]+'/actions/secrets/HAX_DATA',ght,payload,function(s3,b3){
+                        if(s3===201||s3===204){ show('ok','✅ 推送成功!'); document.getElementById('pz').style.display='none'; }
+                        else {
+                            var msg=''; try{ msg=JSON.parse(b3).message||b3; }catch(e){ msg=b3; }
+                            show('err','❌ 推送失败 (HTTP '+s3+') '+String(msg).slice(0,100));
+                        }
+                    });
+                }).catch(function(e){ show('err','❌ 加密异常: '+e.message); });
+            });
+        });
     }
 
     document.getElementById('bcp').onclick=window.cp;
@@ -209,5 +242,5 @@
         refresh();
     }
 
-    console.log('[HAX] ✅ v5.5 就绪');
+    console.log('[HAX] ✅ v5.6 就绪');
 })();
