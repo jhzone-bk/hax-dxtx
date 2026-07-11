@@ -8,8 +8,13 @@
  *   - # 之前：Telegram OAuth 抓到的 stel_token / stel_ssid
  *   - # 之后：在 https://hax.co.id/vps-info/ 抓到的 PHPSESSID
  *
- * 推送：设置 BARK_KEY 环境变量（Bark 的 key）可走 Bark 推送；
- *       未设置则仅打印到日志（GitHub Actions 日志即推送）。
+ * 推送：
+ *   - 设置 BARK_KEY 环境变量（Bark 的 key）可走 Bark 推送；
+ *   - 设置 TG_BOT_TOKEN + TG_CHAT_ID 可走 Telegram 推送；
+ *   - 未设置则仅打印到日志（GitHub Actions 日志即推送）。
+ *
+ * 续期提醒：当任意 VPS 距到期 ≤ 48 小时（默认 2 天，可用 TG_WARN_DAYS 覆盖），
+ *           自动通过 Telegram 发送「主机续期提醒」（不截图，避免无头浏览器触发人机验证）。
  **************************************/
 
 'use strict';
@@ -20,6 +25,9 @@ const UA =
 
 const BASE = 'https://hax.co.id';
 const VPS_URL = BASE + '/vps-info/';
+
+// 续期提醒阈值（天）：默认 2 天 = 48 小时；可用环境变量 TG_WARN_DAYS 临时覆盖（便于测试）
+const RENEW_WARN_DAYS = Number(process.env.TG_WARN_DAYS) || 2;
 
 // ---------- 工具函数 ----------
 function log(...a) {
@@ -220,16 +228,18 @@ async function checkAccount(accountStr, index) {
 
   const lines = [];
   let warn = false;
+  let renew = false;
   for (const it of items) {
     const d = daysLeft(it.date);
     const tag = d <= 7 ? '⚠️ 即将到期' : d <= 30 ? '🟡 一个月内' : '✅';
     if (d <= 7) warn = true;
+    if (d <= RENEW_WARN_DAYS) renew = true; // 48 小时内，触发续期提醒
     const line = `${tag} ${it.name} 到期: ${it.date} (剩 ${d} 天)`;
     log(line);
     lines.push(line);
   }
 
-  return { index, ok: true, warn, lines };
+  return { index, ok: true, warn, renew, lines };
 }
 
 // ---------- Bark 推送 ----------
@@ -246,10 +256,38 @@ async function barkPush(key, title, content) {
   }
 }
 
+// ---------- Telegram 推送 ----------
+async function tgSendMessage(token, chatId, text) {
+  if (!token || !chatId) {
+    log('[TG] 未配置 TG_BOT_TOKEN / TG_CHAT_ID，跳过 Telegram 续期提醒。');
+    return false;
+  }
+  const url = `https://api.telegram.org/bot${token}/sendMessage`;
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, text }),
+    });
+    const j = await res.json().catch(() => ({}));
+    if (j.ok) {
+      log('[TG] 续期提醒已发送至 Telegram');
+      return true;
+    }
+    log(`[TG] 发送失败: ${j.description || res.status}`);
+    return false;
+  } catch (e) {
+    log(`[TG] 发送异常: ${e.message}`);
+    return false;
+  }
+}
+
 // ---------- 主流程 ----------
 async function main() {
   const raw = process.env.HAX_DATA || process.env.hax_data;
   const barkKey = process.env.BARK_KEY || process.env.bark_key;
+  const tgToken = process.env.TG_BOT_TOKEN || process.env.tg_bot_token;
+  const tgChat = process.env.TG_CHAT_ID || process.env.tg_chat_id;
 
   log('🔔 Hax监控, 开始!');
 
@@ -290,6 +328,19 @@ async function main() {
 
   if (barkKey) {
     await barkPush(barkKey, 'Hax监控', details || summary);
+  }
+
+  // 48 小时内到期的续期提醒（Telegram）
+  const renewReports = reports.filter((r) => r.ok && r.renew);
+  if (renewReports.length) {
+    let msg = '🔔 HAX 主机续期提醒\n\n';
+    for (const r of renewReports) {
+      if (r.lines && r.lines.length) msg += r.lines.join('\n') + '\n';
+    }
+    msg += '\n请尽快前往 https://hax.co.id/vps-info/ 续期，避免主机被回收。';
+    log('\n[续期提醒] 检测到以下主机将在 48 小时内到期：');
+    renewReports.forEach((r) => r.lines && r.lines.forEach((l) => log('  ' + l)));
+    await tgSendMessage(tgToken, tgChat, msg);
   }
 
   // 只有真正致命（无数据配置）才非零退出；会话失效/未解析属于业务提醒，正常退出
