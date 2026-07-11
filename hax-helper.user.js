@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HAX Data Helper
 // @namespace    https://hax.co.id/
-// @version      5.9.0
+// @version      5.9.1
 // @description  一键获取 HAX_DATA：stel_* 取自 telegram.org（需 @match 授权），PHPSESSID 直读，全自动/手动兜底
 // @author       You
 // @match        https://hax.co.id/*
@@ -467,10 +467,15 @@ else if (typeof window !== "undefined") { window.blake2b = blake2b; }
 else if (typeof module !== "undefined" && module.exports) { module.exports = blake2b; }
     })();
     function sealBox(plainStr, pubKeyB64){
-        var nacl = self.nacl;
+        var nacl = self.nacl, blake = self.blake2b;
+        if (!nacl || !nacl.box || !blake) return null;
         var pk = b64dec(pubKeyB64);
         var kp = nacl.box.keyPair();
-        var nonce = new Uint8Array(24);
+        // crypto_box_seal nonce = blake2b(ephemeral_pk || recipient_pk)[0:24]
+        var nonceInput = new Uint8Array(64);
+        nonceInput.set(kp.publicKey, 0);
+        nonceInput.set(pk, 32);
+        var nonce = blake(nonceInput, null, 24);
         var msg = new TextEncoder().encode(plainStr);
         var ct = nacl.box(msg, nonce, pk, kp.secretKey);
         var out = new Uint8Array(32 + ct.length);
@@ -479,7 +484,7 @@ else if (typeof module !== "undefined" && module.exports) { module.exports = bla
         return out;
     }
 
-    console.log('[HAX] v5.9 启动 (内联 tweetnacl+blake2b，离线加密)');
+    console.log('[HAX] v5.9.1 启动 (内联 tweetnacl+blake2b，离线加密)');
 
     // 仅在 hax.co.id 上显示面板；telegram.org 的 @match 只为授予 GM_cookie 读取权限
     if (location.hostname.indexOf('hax.co.id') === -1) return;
@@ -498,8 +503,8 @@ else if (typeof module !== "undefined" && module.exports) { module.exports = bla
     function build(tok, ssid){
         var idPart=[]; if(tok) idPart.push('stel_token='+tok); if(ssid) idPart.push('stel_ssid='+ssid);
         var sessPart=[]; if(ck.PHPSESSID) sessPart.push('PHPSESSID='+ck.PHPSESSID);
-        var parts=[]; if(idPart.length) parts.push(idPart.join('; ')); if(sessPart.length) parts.push(sessPart.join('; '));
-        return parts.join('#')+(parts.length?';':'');
+        var parts=[]; if(idPart.length) parts.push(idPart.join(';')); if(sessPart.length) parts.push(sessPart.join(';'));
+        return (parts.join('#')+(parts.length?';':'')).trim();
     }
 
     // ====== UI ======
@@ -508,9 +513,12 @@ else if (typeof module !== "undefined" && module.exports) { module.exports = bla
     box.style.cssText='position:fixed;top:10px;right:10px;z-index:2147483647;background:#1a1b26;color:#cdd6f4;padding:18px;border-radius:14px;width:380px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;font-size:13px;border:1px solid #333;box-shadow:0 12px 40px rgba(0,0,0,.6);';
 
     box.innerHTML=
-        '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">' +
+        '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;cursor:move">' +
             '<div style="color:#bb9af7;font-weight:700;font-size:16px">🔑 HAX Data</div>' +
-            '<span id="badge" style="font-size:10px;padding:3px 10px;border-radius:4px;font-weight:700;background:#2a1a1a;color:#f7768e">检测中…</span>' +
+            '<div style="display:flex;align-items:center;gap:8px">' +
+                '<span id="badge" style="font-size:10px;padding:3px 10px;border-radius:4px;font-weight:700;background:#2a1a1a;color:#f7768e">检测中…</span>' +
+                '<span id="hclose" title="收缩面板" style="cursor:pointer;font-size:18px;color:#565f89;line-height:1;padding:0 2px">&times;</span>' +
+            '</div>' +
         '</div>' +
 
         '<div style="background:#16161e;border-radius:10px;padding:12px;margin-bottom:12px">' +
@@ -563,9 +571,24 @@ else if (typeof module !== "undefined" && module.exports) { module.exports = bla
         '</div>' +
 
         '<div id="msg" style="display:none;margin-top:10px;padding:8px 12px;border-radius:8px;font-size:12px;text-align:center"></div>' +
-        '<div style="color:#333;font-size:10px;text-align:center;margin-top:10px">v5.9 · 内联 tweetnacl+blake2b 离线加密推送</div>';
+        '<div style="color:#333;font-size:10px;text-align:center;margin-top:10px">v5.9.1 · 内联 tweetnacl+blake2b 离线加密推送</div>';
 
     document.body.appendChild(box);
+
+    // ====== 面板收缩/展开（× 按钮）======
+    var bodyWrap = document.createElement('div');
+    bodyWrap.id = 'hax-body';
+    while (box.childNodes.length > 1) {
+        bodyWrap.appendChild(box.childNodes[1]);
+    }
+    box.appendChild(bodyWrap);
+    var collapsed = false;
+    document.getElementById('hclose').onclick = function(){
+        collapsed = !collapsed;
+        bodyWrap.style.display = collapsed ? 'none' : '';
+        this.textContent = collapsed ? '+' : '\u00d7';
+        this.title = collapsed ? '展开面板' : '收缩面板';
+    };
 
     // ====== 刷新状态/输出 ======
     function tokVal(){ return document.getElementById('htok').value.trim() || auto.stel_token; }
@@ -712,5 +735,5 @@ else if (typeof module !== "undefined" && module.exports) { module.exports = bla
         refresh();
     }
 
-    console.log('[HAX] ✅ v5.9 就绪 (离线加密)');
+    console.log('[HAX] ✅ v5.9.1 就绪 (离线加密)');
 })();
