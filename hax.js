@@ -478,6 +478,23 @@ async function main() {
     await tgSendMessage(tgToken, tgChat, msg);
   }
 
+  // Cookie 失效告警（独立于到期提醒，不受 2 天阈值限制）
+  const expiredReports = reports.filter((r) => r.expired);
+  if (expiredReports.length) {
+    let msg = '⚠️ HAX Cookie 失效告警\n\n';
+    for (const r of expiredReports) {
+      msg += `账号 ${r.index + 1} 的会话已过期（stel_token / PHPSESSID 失效），脚本无法获取 VPS 数据。\n`;
+      if (!extractIdentityCookies(accounts[r.index])) {
+        msg += '⚠️ HAX_DATA 中未找到 stel_token，无法自动续命。\n';
+      }
+    }
+    msg += '\n请尽快前往 https://hax.co.id 登录并更新 Secrets 中的 HAX_DATA 凭证。\n'
+          + '更新后脚本将恢复正常监控（下次定时任务生效）。';
+    log('\n[Cookie告警] 检测到以下账号 Cookie 已失效：');
+    expiredReports.forEach((r) => log(`  账号 ${r.index + 1}`));
+    await tgSendMessage(tgToken, tgChat, msg);
+  }
+
   // 只有真正致命（无数据配置）才非零退出；会话失效/未解析属于业务提醒，正常退出
   process.exit(0);
 }
