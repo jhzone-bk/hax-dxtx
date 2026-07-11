@@ -168,8 +168,10 @@ async function checkAccount(accountStr, index) {
 
   let res;
   let body = '';
-  // 首次访问常返回「请稍候…」闸门页，5 秒后刷新才出真实数据，故最多重试 4 次
-  for (let attempt = 1; attempt <= 4; attempt++) {
+  let items = [];
+  // 首次访问可能返回「请稍候…」闸门页，或返回暂无数据的临时页；
+  // 两种情况都通过重试解决（带浏览器头后通常第一次即出真实数据）
+  for (let attempt = 1; attempt <= 5; attempt++) {
     headers.Cookie = serializeCookies(cookies);
     try {
       res = await fetch(VPS_URL, { headers, redirect: 'manual' });
@@ -201,34 +203,18 @@ async function checkAccount(accountStr, index) {
       return { index, ok: false, expired: true };
     }
 
-    if (!isWaitingPage(body)) break; // 已拿到真实页面
-    if (attempt < 4) {
-      log(`  [等待] 命中「请稍候」验证页，6 秒后重试 (${attempt}/4)`);
-      await sleep(6000);
+    items = parseExpiry(body);
+    if (!isWaitingPage(body) && items.length > 0) break; // 已拿到真实数据
+
+    if (attempt < 5) {
+      const reason = isWaitingPage(body) ? '请稍候验证页' : '页面暂无到期数据';
+      log(`  [等待] 命中「${reason}」，3 秒后重试 (${attempt}/5)`);
+      await sleep(3000);
     }
   }
 
-    // 解析到期信息
-    const items = parseExpiry(body);
-    if (items.length === 0) {
-      // 临时诊断：把标签剥离后的文本打印出来，看实际格式
-      const cleaned = body
-        .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-        .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-        .replace(/<[^>]+>/g, ' ')
-        .replace(/&nbsp;/gi, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
-      log('[诊断] 未解析到日期，页面清洗后文本（前 2500 字符）：');
-      log(cleaned.slice(0, 2500));
-      log('[诊断] 结束。');
-    }
   if (items.length === 0) {
-    log('[提醒] 页面已获取，但未解析到到期日期。');
-    log('        已将原始 HTML 片段打印在下方，便于后续微调解析规则：');
-    log('-------- RAW HTML (脱敏前 1200 字符) --------');
-    log(body.slice(0, 1200));
-    log('---------------------------------------------');
+    log('[提醒] 页面已获取，但未解析到到期日期（可能页面结构变化，需微调解析规则）。');
     return { index, ok: false, noData: true };
   }
 
