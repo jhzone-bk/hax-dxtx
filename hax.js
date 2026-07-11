@@ -41,7 +41,8 @@ function maskCookie(cookie) {
   return cookie.replace(/(=[^;]+)/g, (m) => '=' + (m.length > 8 ? m.slice(1, 5) + '****' : '****'));
 }
 
-// 解析页面里出现的到期信息（启发式，兼容多种布局）
+// 解析页面里出现的到期信息
+// 优先提取 "Valid until" / "到期" / "Expiration" 等标签后的日期，并排除创建日期等无关日期。
 function parseExpiry(html) {
   // 去掉 script / style，避免误匹配
   const cleaned = html
@@ -52,22 +53,35 @@ function parseExpiry(html) {
     .replace(/\s+/g, ' ')
     .trim();
 
+  // 常见日期格式：YYYY-MM-DD / MM-DD-YYYY / YYYY/MM/DD / MM/DD/YYYY / 带点 / July 15, 2026
+  const dateRe =
+    /(\d{4}[-/.]\d{1,2}[-/.]\d{1,2})|(\d{1,2}[-/.]\d{1,2}[-/.]\d{4})|((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{1,2},?\s+\d{4})/gi;
+
+  // 1. 优先：找到 "Valid until" / "到期" / "过期" / "Expiration" / "Expires" / "Expiry" 标签，取其后最近的日期
+  const targetLabels = /Valid until|valid until|到期|Expires?|Expiration|Expiry|过期|到期日|Valid Until/i;
+  const labelMatch = targetLabels.exec(cleaned);
+  if (labelMatch) {
+    const segment = cleaned.slice(labelMatch.index, labelMatch.index + 160);
+    const dateMatch = segment.match(dateRe);
+    if (dateMatch) {
+      return [{ name: 'VPS Valid Until', date: normalizeDate(dateMatch[0]), note: '到期' }];
+    }
+  }
+
+  // 2. 兜底：扫描所有日期，但排除 Creation Date / Created / Current time 等无关字段
   const results = [];
   const seen = new Set();
-
-  // 常见日期格式（同时支持 YYYY-MM-DD / MM-DD-YYYY / YYYY/MM/DD / MM/DD/YYYY / 带点）
-  const dateRe =
-    /(\d{4}[-/.]\d{1,2}[-/.]\d{1,2})|(\d{1,2}[-/.]\d{1,2}[-/.]\d{4})/g;
-
   let m;
   while ((m = dateRe.exec(cleaned)) !== null) {
     const dateStr = m[0];
     const idx = m.index;
-    // 取日期前 60 个字符作为上下文（通常是 VPS 名称 / 套餐名）
-    const ctx = cleaned.slice(Math.max(0, idx - 60), idx).trim();
-    const name = ctx.split(/[\s,|]/).pop() || '(未知)';
+    const ctx = cleaned.slice(Math.max(0, idx - 80), idx + 30).toLowerCase();
+    if (ctx.includes('creation') || ctx.includes('created') || ctx.includes('create date') || ctx.includes('current time') || ctx.includes('create')) {
+      continue;
+    }
+    const name = cleaned.slice(Math.max(0, idx - 60), idx).trim().split(/[\s,|]/).pop() || '(未知)';
     const norm = normalizeDate(dateStr);
-    if (seen.has(norm + '|' + name)) continue; // 去重
+    if (seen.has(norm + '|' + name)) continue;
     seen.add(norm + '|' + name);
     results.push({ name, date: norm });
   }
@@ -76,6 +90,15 @@ function parseExpiry(html) {
 }
 
 function normalizeDate(s) {
+  // 先处理英文月份：July 15, 2026 → 2026-07-15
+  const monthRe = /((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*)\s+(\d{1,2}),?\s+(\d{4})/i;
+  const mm = s.match(monthRe);
+  if (mm) {
+    const months = { jan:1, feb:2, mar:3, apr:4, may:5, jun:6, jul:7, aug:8, sep:9, oct:10, nov:11, dec:12 };
+    const mon = months[mm[1].toLowerCase().slice(0,3)];
+    return `${mm[3]}-${String(mon).padStart(2, '0')}-${String(mm[2]).padStart(2, '0')}`;
+  }
+
   s = s.replace(/\./g, '-').replace(/\//g, '-');
   const parts = s.split('-');
   if (parts[0].length === 4) {
@@ -155,15 +178,6 @@ async function checkAccount(accountStr, index) {
       return { index, ok: false, error: e.message };
     }
     body = await res.text();
-
-    // === DEBUG（诊断用，确认根因后可移除）===
-    log(`  [debug] status=${res.status} set-cookie=${(res.headers.get('set-cookie') || '(none)').slice(0, 120)}`);
-    if (isWaitingPage(body)) {
-      log(`  [debug] gate body length=${body.length}`);
-      const markers = body.match(/(<form[\s\S]*?<\/form>)|(meta[^>]*http-equiv=["']?refresh[^>]*>)|(window\.location[^;]*;?)|(document\.cookie[^;]*;?)/gi);
-      if (markers) log('  [debug] markers: ' + markers.slice(0, 6).join('  ||  '));
-    }
-    // === END DEBUG ===
 
     // 合并服务端下发的 Set-Cookie（如会话刷新）
     const setCookie = res.headers.get('set-cookie');
