@@ -92,42 +92,90 @@ function daysLeft(dateStr) {
   return diff;
 }
 
+// ---------- cookie 工具 ----------
+function parseCookieString(str) {
+  const map = {};
+  (str || '')
+    .split(';')
+    .map((p) => p.trim())
+    .filter(Boolean)
+    .forEach((p) => {
+      const eq = p.indexOf('=');
+      if (eq > 0) map[p.slice(0, eq).trim()] = p.slice(eq + 1).trim();
+    });
+  return map;
+}
+
+function serializeCookies(map) {
+  return Object.entries(map)
+    .map(([k, v]) => `${k}=${v}`)
+    .join('; ');
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// 判断是否为 hax.co.id 的「请稍候…」验证闸门页
+function isWaitingPage(body) {
+  return (
+    /<title>请稍候/i.test(body) ||
+    /请稍候…/.test(body) ||
+    /window\.location\.reload\(\)/.test(body)
+  );
+}
+
 // ---------- 抓取单个账号 ----------
 async function checkAccount(accountStr, index) {
-  const cookie = buildCookie(accountStr);
   log(`\n================== 账号 ${index + 1} ==================`);
-  log(`Cookie: ${maskCookie(cookie)}`);
+  const initCookie = buildCookie(accountStr);
+  log(`Cookie: ${maskCookie(initCookie)}`);
 
+  const cookies = parseCookieString(initCookie);
   const headers = {
     'User-Agent': UA,
     Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
     'Accept-Language': 'zh-CN,zh;q=0.9',
-    Cookie: cookie,
   };
 
   let res;
-  try {
-    res = await fetch(VPS_URL, { headers, redirect: 'manual' });
-  } catch (e) {
-    log(`[错误] 请求失败: ${e.message}`);
-    return { index, ok: false, error: e.message };
-  }
+  let body = '';
+  // 首次访问常返回「请稍候…」闸门页，5 秒后刷新才出真实数据，故最多重试 4 次
+  for (let attempt = 1; attempt <= 4; attempt++) {
+    headers.Cookie = serializeCookies(cookies);
+    try {
+      res = await fetch(VPS_URL, { headers, redirect: 'manual' });
+    } catch (e) {
+      log(`[错误] 请求失败: ${e.message}`);
+      return { index, ok: false, error: e.message };
+    }
+    body = await res.text();
 
-  const finalUrl = res.url || VPS_URL;
-  const body = await res.text();
+    // 合并服务端下发的 Set-Cookie（如会话刷新）
+    const setCookie = res.headers.get('set-cookie');
+    if (setCookie) {
+      for (const part of setCookie.split(',')) {
+        const m = part.match(/([^=;\s]+)=([^;]+)/);
+        if (m) cookies[m[1]] = m[2];
+      }
+    }
 
-  // 未登录判定：被重定向到 /login，或页面含登录页特征
-  const isLoginPage =
-    res.status === 302 ||
-    res.headers.get('location')?.includes('/login') ||
-    /<title>Login/i.test(body) ||
-    /meta http-equiv="refresh"[^>]*\/login/i.test(body) ||
-    body.includes('Please login');
+    // 未登录判定
+    const isLoginPage =
+      res.status === 302 ||
+      res.headers.get('location')?.includes('/login') ||
+      /<title>Login/i.test(body) ||
+      /meta http-equiv="refresh"[^>]*\/login/i.test(body) ||
+      body.includes('Please login');
+    if (isLoginPage) {
+      log('[提醒] 会话已失效，PHPSESSID 需要重新抓取（或 stel cookie 已过期）。');
+      log('        请重新从 https://hax.co.id/vps-info/ 抓取 PHPSESSID 更新 HAX_DATA。');
+      return { index, ok: false, expired: true };
+    }
 
-  if (isLoginPage) {
-    log('[提醒] 会话已失效，PHPSESSID 需要重新抓取（或 stel cookie 已过期）。');
-    log('        请重新从 https://hax.co.id/vps-info/ 抓取 PHPSESSID 更新 HAX_DATA。');
-    return { index, ok: false, expired: true };
+    if (!isWaitingPage(body)) break; // 已拿到真实页面
+    if (attempt < 4) {
+      log(`  [等待] 命中「请稍候」验证页，6 秒后重试 (${attempt}/4)`);
+      await sleep(6000);
+    }
   }
 
   // 解析到期信息
