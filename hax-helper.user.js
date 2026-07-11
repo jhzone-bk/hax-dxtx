@@ -1,17 +1,22 @@
 // ==UserScript==
 // @name         HAX Data Helper
 // @namespace    https://hax.co.id/
-// @version      5.4.0
-// @description  一键获取 HAX_DATA：stel_* 取自 oauth.telegram.org，PHPSESSID 直读，全自动/手动兜底
+// @version      5.5.0
+// @description  一键获取 HAX_DATA：stel_* 取自 telegram.org（需 @match 授权），PHPSESSID 直读，全自动/手动兜底
 // @author       You
 // @match        https://hax.co.id/*
+// @match        https://telegram.org/*
+// @match        https://*.telegram.org/*
 // @grant        GM_cookie
 // @run-at       document-idle
 // ==/UserScript==
 
 (function() {
     'use strict';
-    console.log('[HAX] v5.4 启动');
+    console.log('[HAX] v5.5 启动');
+
+    // 仅在 hax.co.id 上显示面板；telegram.org 的 @match 只为授予 GM_cookie 读取权限
+    if (location.hostname.indexOf('hax.co.id') === -1) return;
 
     function m(v){ return (!v||v.length<=8)?'****':v.slice(0,4)+'****'+v.slice(-2); }
     function esc(s){ var d=document.createElement('div');d.textContent=s||'';return d.innerHTML; }
@@ -170,31 +175,39 @@
 
     refresh();
 
-    // ====== 用 GM_cookie 从 oauth.telegram.org 读 stel（Telegram 登录 OAuth 域） ======
+    // ====== 用 GM_cookie 从 telegram.org 域读 stel ======
+    // 关键：脚本 @match 已加入 telegram.org，GM_cookie 才有该域的 host 读取权限
     console.log('[HAX] GM_cookie:', typeof GM_cookie);
-    var stelDomains = ['oauth.telegram.org', 'telegram.org', '.telegram.org'];
     if (typeof GM_cookie !== 'undefined' && GM_cookie.list) {
-        stelDomains.forEach(function(dom){
+        var domainQueries = [{domain:'telegram.org'}, {domain:'oauth.telegram.org'}];
+        var urlQueries    = [{url:'https://telegram.org/'}, {url:'https://oauth.telegram.org/'}];
+        function probe(list, i, done){
+            if (i >= list.length) { done(); return; }
+            var q = list[i];
             try {
-                GM_cookie.list({domain: dom}, function(all, err){
+                GM_cookie.list(q, function(all, err){
                     if (!err && all) {
                         all.forEach(function(c){
                             if (c.name === 'stel_token') auto.stel_token = c.value;
                             if (c.name === 'stel_ssid') auto.stel_ssid = c.value;
                         });
                     }
-                    console.log('[HAX] 域', dom, 'stel:', !!auto.stel_token, !!auto.stel_ssid);
-                    // 预填输入框（用户可改）
-                    if (auto.stel_token) document.getElementById('htok').value = auto.stel_token;
-                    if (auto.stel_ssid)  document.getElementById('hssid').value = auto.stel_ssid;
-                    refresh();
+                    console.log('[HAX] 查询', JSON.stringify(q), 'stel:', !!auto.stel_token, !!auto.stel_ssid, err ? ('err:'+err) : '');
+                    probe(list, i+1, done);
                 });
-            } catch(e){ console.log('[HAX] GM_cookie 异常', dom, e.message); }
+            } catch(e){ console.log('[HAX] GM_cookie 异常', JSON.stringify(q), e.message); probe(list, i+1, done); }
+        }
+        probe(domainQueries, 0, function(){
+            probe(urlQueries, 0, function(){
+                if (auto.stel_token) document.getElementById('htok').value = auto.stel_token;
+                if (auto.stel_ssid)  document.getElementById('hssid').value = auto.stel_ssid;
+                refresh();
+            });
         });
     } else {
         console.log('[HAX] GM_cookie 不可用，走手动');
         refresh();
     }
 
-    console.log('[HAX] ✅ v5.4 就绪');
+    console.log('[HAX] ✅ v5.5 就绪');
 })();
