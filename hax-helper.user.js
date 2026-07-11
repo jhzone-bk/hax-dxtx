@@ -1,109 +1,85 @@
 // ==UserScript==
 // @name         HAX Data Helper
 // @namespace    https://hax.co.id/
-// @version      5.2.0
-// @description  一键获取 hax.co.id 的 HAX_DATA（PHPSESSID 自动读，stel_* 手动粘贴，不落盘保存）
+// @version      5.3.0
+// @description  一键获取 HAX_DATA：GM_cookie 自动跨域读 stel_* + PHPSESSID，失败则手动粘贴（不落盘）
 // @author       You
 // @match        https://hax.co.id/*
-// @grant        none
+// @grant        GM_cookie
 // @run-at       document-idle
 // ==/UserScript==
 
 (function() {
     'use strict';
-    console.log('[HAX] v5.2 启动');
+    console.log('[HAX] v5.3 启动');
 
-    // ====== 工具 ======
     function m(v){ return (!v||v.length<=8)?'****':v.slice(0,4)+'****'+v.slice(-2); }
     function esc(s){ var d=document.createElement('div');d.textContent=s||'';return d.innerHTML; }
 
-    // ====== 读 cookie（PHPSESSID 非 httpOnly 可自动读；stel_* 为 httpOnly，document.cookie 读不到） ======
+    // 同步先拿 document.cookie（PHPSESSID 非 httpOnly 可直读）
     var raw = document.cookie || '';
     var ck = {};
-    raw.split(';').forEach(function(c) {
-        var i = c.indexOf('=');
-        if (i > 0) ck[c.slice(0,i).trim()] = c.slice(i+1).trim();
-    });
+    raw.split(';').forEach(function(c){ var i=c.indexOf('='); if(i>0) ck[c.slice(0,i).trim()]=c.slice(i+1).trim(); });
 
-    console.log('[HAX] 自动读到:', {stel_token:!!ck.stel_token, stel_ssid:!!ck.stel_ssid, PHPSESSID:!!ck.PHPSESSID});
+    // 自动读取到的 stel（来自 GM_cookie，可能挂在子域）
+    var auto = { stel_token:'', stel_ssid:'' };
 
-    // ====== 构建输出 ======
-    // HAX_DATA 格式:  stel_token=..; stel_ssid=..#PHPSESSID=..;
-    function build(tok, ssid) {
-        var idPart = [];
-        if (tok)  idPart.push('stel_token=' + tok);
-        if (ssid) idPart.push('stel_ssid=' + ssid);
-        var sessPart = [];
-        if (ck.PHPSESSID) sessPart.push('PHPSESSID=' + ck.PHPSESSID);
-        var parts = [];
-        if (idPart.length)  parts.push(idPart.join('; '));
-        if (sessPart.length) parts.push(sessPart.join('; '));
-        return parts.join('#') + (parts.length ? ';' : '');
+    function build(tok, ssid){
+        var idPart=[]; if(tok) idPart.push('stel_token='+tok); if(ssid) idPart.push('stel_ssid='+ssid);
+        var sessPart=[]; if(ck.PHPSESSID) sessPart.push('PHPSESSID='+ck.PHPSESSID);
+        var parts=[]; if(idPart.length) parts.push(idPart.join('; ')); if(sessPart.length) parts.push(sessPart.join('; '));
+        return parts.join('#')+(parts.length?';':'');
     }
 
     // ====== UI ======
-    var box = document.createElement('div');
-    box.id = 'hax-box';
-    box.style.cssText = 'position:fixed;top:10px;right:10px;z-index:2147483647;background:#1a1b26;color:#cdd6f4;padding:18px;border-radius:14px;width:380px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;font-size:13px;border:1px solid #333;box-shadow:0 12px 40px rgba(0,0,0,.6);';
+    var box=document.createElement('div');
+    box.id='hax-box';
+    box.style.cssText='position:fixed;top:10px;right:10px;z-index:2147483647;background:#1a1b26;color:#cdd6f4;padding:18px;border-radius:14px;width:380px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;font-size:13px;border:1px solid #333;box-shadow:0 12px 40px rgba(0,0,0,.6);';
 
-    var hasSess = !!ck.PHPSESSID;
-    var autoAll = ck.stel_token && ck.stel_ssid && ck.PHPSESSID;
-
-    box.innerHTML =
-
-        /* 标题栏 */
+    box.innerHTML=
         '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">' +
             '<div style="color:#bb9af7;font-weight:700;font-size:16px">🔑 HAX Data</div>' +
-            '<span style="font-size:10px;padding:3px 10px;border-radius:4px;font-weight:700;' +
-                (autoAll ? 'background:#1a2a1a;color:#9ece6a' : hasSess ? 'background:#2a2510;color:#e0af68' : 'background:#2a1a1a;color:#f7768e') + '">' +
-                (autoAll ? '✅ 全自动' : hasSess ? '⚠️ 需补 stel' : '❌ 未登录') + '</span>' +
+            '<span id="badge" style="font-size:10px;padding:3px 10px;border-radius:4px;font-weight:700;background:#2a1a1a;color:#f7768e">检测中…</span>' +
         '</div>' +
 
-        /* Cookie 状态 */
         '<div style="background:#16161e;border-radius:10px;padding:12px;margin-bottom:12px">' +
             '<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #222">' +
                 '<span style="color:#7aa2f7;font-weight:600">stel_token</span>' +
-                '<span style="font-family:monospace;font-size:11.5px;color:#f7768e">❌ httpOnly</span></div>' +
+                '<span id="stok" style="font-family:monospace;font-size:11.5px;color:#e0af68">⏳ 检测中</span></div>' +
             '<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #222">' +
                 '<span style="color:#7aa2f7;font-weight:600">stel_ssid</span>' +
-                '<span style="font-family:monospace;font-size:11.5px;color:#f7768e">❌ httpOnly</span></div>' +
+                '<span id="sssid" style="font-family:monospace;font-size:11.5px;color:#e0af68">⏳ 检测中</span></div>' +
             '<div style="display:flex;justify-content:space-between;padding:5px 0">' +
                 '<span style="color:#7aa2f7;font-weight:600">PHPSESSID</span>' +
-                '<span style="font-family:monospace;font-size:11.5px;color:'+(hasSess?'#a6e3a1':'#f7768e')+'">' +
-                    (hasSess?'✅ 自动 '+m(ck.PHPSESSID):'❌ 缺失')+'</span></div>' +
+                '<span id="spse" style="font-family:monospace;font-size:11.5px;color:'+(ck.PHPSESSID?'#a6e3a1':'#f7768e')+'">'+(ck.PHPSESSID?'✅ 自动 '+m(ck.PHPSESSID):'❌ 缺失')+'</span></div>' +
         '</div>' +
 
-        /* 手动输入区（stel_* 为 httpOnly，始终手动粘贴） */
         '<div style="margin-bottom:12px">' +
-            '<div style="font-size:11.5px;color:#e0af68;margin-bottom:8px;display:flex;align-items:center;gap:4px">' +
-                '📋 <b>请粘贴 stel_*（F12→Application→Cookies 复制）</b></div>' +
+            '<div id="hint" style="font-size:11.5px;color:#e0af68;margin-bottom:8px;display:flex;align-items:center;gap:4px">📋 正在尝试自动读取 stel_* …</div>' +
             '<div style="display:flex;flex-direction:column;gap:6px">' +
                 '<div style="display:flex;gap:6px;align-items:center">' +
                     '<span style="color:#7aa2f7;font-size:11.5px;font-weight:600;min-width:80px">stel_token</span>' +
-                    '<input id="htok" placeholder="粘贴值..." style="flex:1;background:#11111b;border:1px solid #333;color:#c0caf5;padding:7px 10px;border-radius:6px;font-family:monospace;font-size:11px;outline:none" />' +
+                    '<input id="htok" placeholder="自动读取中…" style="flex:1;background:#11111b;border:1px solid #333;color:#c0caf5;padding:7px 10px;border-radius:6px;font-family:monospace;font-size:11px;outline:none" />' +
                 '</div>' +
                 '<div style="display:flex;gap:6px;align-items:center">' +
                     '<span style="color:#7aa2f7;font-size:11.5px;font-weight:600;min-width:80px">stel_ssid</span>' +
-                    '<input id="hssid" placeholder="粘贴值..." style="flex:1;background:#11111b;border:1px solid #333;color:#c0caf5;padding:7px 10px;border-radius:6px;font-family:monospace;font-size:11px;outline:none" />' +
+                    '<input id="hssid" placeholder="自动读取中…" style="flex:1;background:#11111b;border:1px solid #333;color:#c0caf5;padding:7px 10px;border-radius:6px;font-family:monospace;font-size:11px;outline:none" />' +
                 '</div>' +
             '</div>' +
         '</div>' +
 
-        /* 输出 */
         '<div style="font-size:11px;color:#565f89;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">HAX_DATA 输出</div>' +
-        '<div id="hout" onclick="cp()" style="background:#13141f;border:1px solid #2a2a3a;border-radius:8px;padding:12px;word-break:break-all;cursor:pointer;transition:border-color .2s;max-height:100px;overflow:auto"' +
+        '<div id="hout" onclick="cp()" style="background:#13141f;border:1px solid #2a2a3a;border-radius:8px;padding:12px;word-break:break-all;cursor:pointer;max-height:100px;overflow:auto"' +
         ' onmouseover="this.style.borderColor=\'#7aa2f7\'" onmouseout="this.style.borderColor=\'#2a2a3a\'">' +
             '<pre id="htxt" style="margin:0;font-family:Cascadia Code,Fira Code,Consolas,monospace;font-size:10.5px;line-height:1.7;color:#a6e3a1;white-space:pre-wrap">'+esc(build('',''))+'</pre>' +
         '</div>' +
 
-        /* 按钮 */
         '<div style="display:flex;gap:8px;margin-top:12px">' +
             '<button id="bcp" style="flex:1;padding:10px;border:none;border-radius:9px;background:linear-gradient(135deg,#7aa2f7,#89b4fa);color:#fff;font-weight:700;cursor:pointer;font-size:12.5px">📋 一键复制</button>' +
             '<button id="bpsh" style="flex:1;padding:10px;border:none;border-radius:9px;background:linear-gradient(135deg,#9ece6a,#a6e3a1);color:#1a1b26;font-weight:700;cursor:pointer;font-size:12.5px">🚀 推送 Secret</button>' +
             '<button id="brf" style="padding:10px 12px;border:none;border-radius:9px;background:transparent;color:#565f89;border:1px solid #333;cursor:pointer;font-size:12px">🔄</button>' +
         '</div>' +
 
-        /* 推送配置 */
         '<div id="pz" style="display:none;border-top:1px solid #2a2a3a;margin-top:12px;padding-top:12px">' +
             '<div style="font-size:11px;color:#565f89;margin-bottom:4px">GitHub PAT（repo 权限）</div>' +
             '<input id="ght" type="password" placeholder="ghp_..." style="width:100%;box-sizing:border-box;background:#11111b;border:1px solid #333;color:#c0caf5;padding:9px 12px;border-radius:8px;font-size:12px;margin-bottom:8px;outline:none" />' +
@@ -115,50 +91,58 @@
             '</div>' +
         '</div>' +
 
-        /* 状态 */
         '<div id="msg" style="display:none;margin-top:10px;padding:8px 12px;border-radius:8px;font-size:12px;text-align:center"></div>' +
-        '<div style="color:#333;font-size:10px;text-align:center;margin-top:10px">v5.2 · httpOnly 需手动粘贴（不保存）</div>';
+        '<div style="color:#333;font-size:10px;text-align:center;margin-top:10px">v5.3 · GM_cookie 自动读（失败则手动）</div>';
 
     document.body.appendChild(box);
 
-    // ====== 函数 ======
-    window.cp = function(){
+    // ====== 刷新状态/输出 ======
+    function tokVal(){ return document.getElementById('htok').value.trim() || auto.stel_token; }
+    function ssidVal(){ return document.getElementById('hssid').value.trim() || auto.stel_ssid; }
+
+    function refresh(){
+        var tok=tokVal(), ssid=ssidVal();
+        document.getElementById('htxt').textContent=build(tok, ssid);
+
+        var autoTok = !!(auto.stel_token && !document.getElementById('htok').value.trim());
+        var autoSsid = !!(auto.stel_ssid && !document.getElementById('hssid').value.trim());
+        var manualTok = !!document.getElementById('htok').value.trim();
+        var manualSsid = !!document.getElementById('hssid').value.trim();
+
+        document.getElementById('stok').textContent = autoTok ? ('✅ 自动 '+m(auto.stel_token)) : manualTok ? ('✅ 手动 '+m(document.getElementById('htok').value.trim())) : '❌ 未获取';
+        document.getElementById('stok').style.color = (autoTok||manualTok) ? '#a6e3a1' : '#f7768e';
+        document.getElementById('sssid').textContent = autoSsid ? ('✅ 自动 '+m(auto.stel_ssid)) : manualSsid ? ('✅ 手动 '+m(document.getElementById('hssid').value.trim())) : '❌ 未获取';
+        document.getElementById('sssid').style.color = (autoSsid||manualSsid) ? '#a6e3a1' : '#f7768e';
+
+        var hasStel = (autoTok||manualTok) && (autoSsid||manualSsid);
+        var badge=document.getElementById('badge');
+        if (ck.PHPSESSID && hasStel){ badge.textContent='✅ 全自动'; badge.style.background='#1a2a1a'; badge.style.color='#9ece6a'; }
+        else if (ck.PHPSESSID){ badge.textContent='⚠️ 需补 stel'; badge.style.background='#2a2510'; badge.style.color='#e0af68'; }
+        else { badge.textContent='❌ 未登录'; badge.style.background='#2a1a1a'; badge.style.color='#f7768e'; }
+
+        document.getElementById('hint').textContent = hasStel ? '✅ 已就绪，可直接复制/推送' : '📋 若未自动读取，请手动粘贴 stel_*（F12→Application→Cookies）';
+        document.getElementById('hint').style.color = hasStel ? '#9ece6a' : '#e0af68';
+    }
+
+    // ====== 复制 / 推送 等函数 ======
+    window.cp=function(){
         var t=document.getElementById('htxt').textContent;
-        if(!t||t.includes('(空)')){show('err','⚠️ 还没有数据');return}
+        if(!t||t.length<10){show('err','⚠️ 还没有数据');return}
         navigator.clipboard.writeText(t).then(function(){show('ok','✅ 已复制!')},function(){
             var ta=document.createElement('textarea');ta.value=t;ta.style.cssText='position:fixed;top:-9999px';
             document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta);
             show('ok','✅ 已复制!');
         });
     };
-
-    function show(ty, tx){
-        var el=document.getElementById('msg');
-        el.textContent=tx;el.style.display='block';
+    function show(ty,tx){ var el=document.getElementById('msg'); el.textContent=tx; el.style.display='block';
         el.style.background=ty==='ok'?'#1a3a2a':ty==='err'?'#3a1a1a':'#1a2744';
         el.style.color=ty==='ok'?'#9ece6a':ty==='err'?'#f7768e':'#7dcfff';
-        setTimeout(function(){el.style.display='none'},4000);
-    }
-
-    function refreshOutput(){
-        var tok=document.getElementById('htok').value.trim();
-        var ssid=document.getElementById('hssid').value.trim();
-        document.getElementById('htxt').textContent=build(tok, ssid);
-    }
-
-    function doPush(){
-        var t=document.getElementById('htxt').textContent;
-        if(!t||t.length<20){show('err','⚠️ 无数据');return;}
-        document.getElementById('pz').style.display='';
-        document.getElementById('ght').focus();
-        show('info','填入 PAT 后确认');
-    }
+        setTimeout(function(){el.style.display='none'},4000); }
+    function doPush(){ var t=document.getElementById('htxt').textContent; if(!t||t.length<10){show('err','⚠️ 无数据');return;}
+        document.getElementById('pz').style.display=''; document.getElementById('ght').focus(); show('info','填入 PAT 后确认'); }
     async function execPush(){
-        var t=document.getElementById('htxt').textContent;
-        var ght=document.getElementById('ght').value.trim();
-        var ghr=document.getElementById('ghr').value.trim();
-        if(!ght){show('err','❌ 填 PAT');return;}
-        show('info','⏳ 推送中...');
+        var t=document.getElementById('htxt').textContent, ght=document.getElementById('ght').value.trim(), ghr=document.getElementById('ghr').value.trim();
+        if(!ght){show('err','❌ 填 PAT');return;} show('info','⏳ 推送中...');
         try{
             var p=ghr.split('/');
             var kr=await fetch('https://api.github.com/repos/'+p[0]+'/'+p[1]+'/actions/secrets/public-key',{headers:{'Authorization':'token '+ght,'Accept':'application/vnd.github.v3+json'}});
@@ -171,23 +155,42 @@
             var pr=await fetch('https://api.github.com/repos/'+p[0]+'/'+p[1]+'/actions/secrets/HAX_DATA',{method:'PUT',
                 headers:{'Authorization':'token '+ght,'Accept':'application/vnd.github.v3+json','Content-Type':'application/json'},
                 body:JSON.stringify({encrypted_value:btoa(bs),key_id:kd.key_id})});
-            if(pr.status===201||pr.status===204){
-                show('ok','✅ 推送成功!');
-                document.getElementById('pz').style.display='none';
-            }else{var eb='';try{eb=await pr.text();}catch(e){}throw new Error(pr.status+' '+eb.slice(0,60));}
+            if(pr.status===201||pr.status===204){ show('ok','✅ 推送成功!'); document.getElementById('pz').style.display='none'; }
+            else{var eb='';try{eb=await pr.text();}catch(e){}throw new Error(pr.status+' '+eb.slice(0,60));}
         }catch(e){show('err','❌ '+e.message);}
     }
 
-    // ====== 绑定事件 ======
     document.getElementById('bcp').onclick=window.cp;
     document.getElementById('bpsh').onclick=doPush;
     document.getElementById('brf').onclick=function(){location.reload();};
     document.getElementById('bdo').onclick=execPush;
     document.getElementById('bcn').onclick=function(){document.getElementById('pz').style.display='none';};
+    document.getElementById('htok').oninput=refresh;
+    document.getElementById('hssid').oninput=refresh;
 
-    // 输入框实时更新（不落盘）
-    document.getElementById('htok').oninput=refreshOutput;
-    document.getElementById('hssid').oninput=refreshOutput;
+    refresh();
 
-    console.log('[HAX] ✅ v5.2 就绪');
+    // ====== 用 GM_cookie 跨全部域名抓 stel ======
+    console.log('[HAX] GM_cookie:', typeof GM_cookie);
+    if (typeof GM_cookie !== 'undefined' && GM_cookie.list) {
+        try {
+            GM_cookie.list({}, function(all, err){
+                if (err) { console.log('[HAX] GM_cookie err', err); refresh(); return; }
+                (all||[]).forEach(function(c){
+                    if (c.name === 'stel_token') auto.stel_token = c.value;
+                    if (c.name === 'stel_ssid') auto.stel_ssid = c.value;
+                });
+                console.log('[HAX] 自动 stel:', !!auto.stel_token, !!auto.stel_ssid);
+                // 预填输入框（用户可改）
+                if (auto.stel_token) document.getElementById('htok').value = auto.stel_token;
+                if (auto.stel_ssid)  document.getElementById('hssid').value = auto.stel_ssid;
+                refresh();
+            });
+        } catch(e){ console.log('[HAX] GM_cookie 异常', e.message); refresh(); }
+    } else {
+        console.log('[HAX] GM_cookie 不可用，走手动');
+        refresh();
+    }
+
+    console.log('[HAX] ✅ v5.3 就绪');
 })();
