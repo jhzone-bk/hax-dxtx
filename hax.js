@@ -134,6 +134,13 @@ async function checkAccount(accountStr, index) {
     'User-Agent': UA,
     Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
     'Accept-Language': 'zh-CN,zh;q=0.9',
+    'Accept-Encoding': 'gzip, deflate, br',
+    Referer: BASE + '/vps-info/',
+    'Upgrade-Insecure-Requests': '1',
+    'Sec-Fetch-Site': 'same-origin',
+    'Sec-Fetch-Mode': 'navigate',
+    'Sec-Fetch-User': '?1',
+    'Sec-Fetch-Dest': 'document',
   };
 
   let res;
@@ -148,6 +155,15 @@ async function checkAccount(accountStr, index) {
       return { index, ok: false, error: e.message };
     }
     body = await res.text();
+
+    // === DEBUG（诊断用，确认根因后可移除）===
+    log(`  [debug] status=${res.status} set-cookie=${(res.headers.get('set-cookie') || '(none)').slice(0, 120)}`);
+    if (isWaitingPage(body)) {
+      log(`  [debug] gate body length=${body.length}`);
+      const markers = body.match(/(<form[\s\S]*?<\/form>)|(meta[^>]*http-equiv=["']?refresh[^>]*>)|(window\.location[^;]*;?)|(document\.cookie[^;]*;?)/gi);
+      if (markers) log('  [debug] markers: ' + markers.slice(0, 6).join('  ||  '));
+    }
+    // === END DEBUG ===
 
     // 合并服务端下发的 Set-Cookie（如会话刷新）
     const setCookie = res.headers.get('set-cookie');
