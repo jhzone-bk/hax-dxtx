@@ -521,6 +521,8 @@ else if (typeof module !== "undefined" && module.exports) { module.exports = bla
             '</div>' +
         '</div>' +
 
+        '<div id="hax-body">' +
+
         '<div style="background:#16161e;border-radius:10px;padding:12px;margin-bottom:12px">' +
             '<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #222">' +
                 '<span style="color:#7aa2f7;font-weight:600">stel_token <span style="color:#555;font-weight:400;font-size:10px">(TG)</span></span>' +
@@ -571,22 +573,17 @@ else if (typeof module !== "undefined" && module.exports) { module.exports = bla
         '</div>' +
 
         '<div id="msg" style="display:none;margin-top:10px;padding:8px 12px;border-radius:8px;font-size:12px;text-align:center"></div>' +
-        '<div style="color:#333;font-size:10px;text-align:center;margin-top:10px">v5.9.3 · 内联 tweetnacl+blake2b 离线加密推送</div>';
+        '<div style="color:#333;font-size:10px;text-align:center;margin-top:10px">v5.9.3 · 内联 tweetnacl+blake2b 离线加密推送</div>' +
+
+        '</div>';
 
     document.body.appendChild(box);
 
-    // ====== 面板收缩/展开（× 按钮）—— 不改变 DOM 结构，直接 toggle 元素 display ======
-    var header = box.firstChild; // 标题栏 div
-    var bodyEls = [];
-    for (var _i = 1; _i < box.children.length; _i++) {
-        bodyEls.push(box.children[_i]);
-    }
+    // ====== 面板收缩/展开（× 按钮）======
     var collapsed = false;
     document.getElementById('hclose').onclick = function(){
         collapsed = !collapsed;
-        for (var _j = 0; _j < bodyEls.length; _j++) {
-            bodyEls[_j].style.display = collapsed ? 'none' : '';
-        }
+        document.getElementById('hax-body').style.display = collapsed ? 'none' : '';
         this.textContent = collapsed ? '+' : '\u00d7';
         this.title = collapsed ? '展开面板' : '收缩面板';
     };
