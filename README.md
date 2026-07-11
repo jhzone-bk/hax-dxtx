@@ -36,11 +36,45 @@ stel_token=你的token; stel_ssid=你的ssid#PHPSESSID=你的session;
   - **# 之后**：访问 https://hax.co.id/vps-info/ 后抓到的 `PHPSESSID`（易过期，脚本可自动刷新）
 - 多账号用 `@` 分隔
 
-> **获取方式**：
+> **获取方式**（推荐使用 [油猴脚本](#hax-data-helper-油猴脚本) 一键获取）：
 > 1. 在浏览器登录 https://hax.co.id （通过 Telegram Bot 授权）
 > 2. 打开开发者工具 → Application → Cookies → 复制 `stel_token`、`stel_ssid`
 > 3. 访问 https://hax.co.id/vps-info/ → 从 Cookies 里复制 `PHPSESSID`
 > 4. 按上述格式拼接后存入 Secret
+
+### HAX Data Helper 油猴脚本
+
+仓库提供了一键获取 **HAX_DATA** 的油猴脚本 [`hax-helper.user.js`](./hax-helper.user.js)。
+
+#### 安装
+
+1. 浏览器安装 [Tampermonkey](https://www.tampermonkey.net/) 插件
+2. 打开 [`hax-helper.user.js`](https://github.com/jhzone-bk/hax-dxtx/blob/main/hax-helper.user.js) 原始文件，Tampermonkey 会自动弹出「安装脚本」对话框；或手动复制内容新建脚本
+3. 确认脚本的 `@match` 包含 `https://hax.co.id/*`
+
+#### 使用
+
+1. 正常登录 hax.co.id
+2. 页面右上角出现紫色 **🔑 HAX** 按钮
+3. 点击展开面板，显示：
+   - 📋 Cookie 状态（stel_token / stel_ssid / PHPSESSID 是否存在）
+   - 生成的 HAX_DATA 文本
+4. 操作按钮：
+
+| 按钮 | 功能 |
+|------|------|
+| **📋 复制** | 一键复制 HAX_DATA 到剪贴板 |
+| **🚀 推送 Secret** | 输入 GitHub Token，直接更新仓库的 `HAX_DATA` Secret |
+| **🔄 刷新** | 重新读取当前 cookie |
+
+#### 推送 Secret 到 GitHub
+
+点击「推送 Secret」后：
+1. 输入 GitHub PAT（需要 `repo` 权限）
+2. 确认仓库名称（默认 `jhzone-bk/hax-dxtx`）
+3. 点「确认推送」→ 脚本用 RSA 加密后通过 Secrets API 更新
+
+⚠️ Token 仅在浏览器本地使用，不会上传到任何第三方。
 
 ### 3. 定时任务
 
