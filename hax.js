@@ -208,8 +208,21 @@ async function checkAccount(accountStr, index) {
     }
   }
 
-  // 解析到期信息
-  const items = parseExpiry(body);
+    // 解析到期信息
+    const items = parseExpiry(body);
+    if (items.length === 0) {
+      // 临时诊断：把标签剥离后的文本打印出来，看实际格式
+      const cleaned = body
+        .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+        .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+        .replace(/<[^>]+>/g, ' ')
+        .replace(/&nbsp;/gi, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      log('[诊断] 未解析到日期，页面清洗后文本（前 2500 字符）：');
+      log(cleaned.slice(0, 2500));
+      log('[诊断] 结束。');
+    }
   if (items.length === 0) {
     log('[提醒] 页面已获取，但未解析到到期日期。');
     log('        已将原始 HTML 片段打印在下方，便于后续微调解析规则：');
