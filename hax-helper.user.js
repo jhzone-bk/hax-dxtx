@@ -1,11 +1,12 @@
 // ==UserScript==
 // @name         HAX Data Helper
 // @namespace    https://hax.co.id/
-// @version      1.1.0
+// @version      1.2.0
 // @description  一键获取 hax.co.id 的 HAX_DATA（stel_token / stel_ssid / PHPSESSID），支持复制 & 推送到 GitHub Secrets
 // @author       You
 // @match        https://hax.co.id/*
-// @grant        none
+// @grant        GM_cookie
+// @connect      api.github.com
 // @run-at       document-idle
 // ==/UserScript==
 
@@ -13,7 +14,29 @@
   'use strict';
 
   // ========== 工具函数 ==========
-  function getCookies() {
+  // 用 GM_cookie 读取所有 cookie（包括 httpOnly）
+  function getCookiesAsync() {
+    return new Promise(function (resolve) {
+      try {
+        GM_cookie.list({ url: location.href }, function (cookies) {
+          if (cookies) {
+            var map = {};
+            cookies.forEach(function (c) { map[c.name] = c.value; });
+            resolve(map);
+          } else {
+            resolve(fallbackGetCookies());
+          }
+        });
+      } catch (e) {
+        // GM_cookie 不可用时降级到 document.cookie
+        console.warn('[HAX Helper] GM_cookie 不可用，使用降级模式:', e.message);
+        resolve(fallbackGetCookies());
+      }
+    });
+  }
+
+  // 降级：用 document.cookie（读不到 httpOnly 的）
+  function fallbackGetCookies() {
     return document.cookie.split(';').reduce(function (map, c) {
       var eq = c.indexOf('=');
       if (eq > 0) map[c.slice(0, eq).trim()] = c.slice(eq + 1).trim();
@@ -95,7 +118,7 @@
       '    <div class="hax-btn-group"><button class="hax-btn hax-btn-warn" id="hax-do-push">确认推送</button><button class="hax-btn hax-btn-ghost" id="hax-cancel-push">取消</button></div>' +
       '  </div>' +
       '  <div id="hax-helper-status" class="hax-status"></div>' +
-      '  <div class="hax-footer">HAX Helper v1.1 · 仅在本地运行</div>' +
+      '  <div class="hax-footer">HAX Helper v1.2 · GM_cookie 模式 · 仅在本地运行</div>' +
       '</div>';
     document.body.appendChild(panel);
     return panel;
@@ -103,7 +126,7 @@
 
   // ========== 核心逻辑 ==========
   function refreshData() {
-    var cookies = getCookies();
+    return getCookiesAsync().then(function (cookies) {
     var haxData = buildHAXData(cookies);
 
     var output = document.getElementById('hax-output');
@@ -125,7 +148,8 @@
       }).join('');
     }
     return haxData;
-  }
+  });  // end of getCookiesAsync().then()
+}
 
   async function copyToClipboard(text) {
     try {
@@ -243,7 +267,7 @@
   }
 
   // ========== 初始化 ==========
-  console.log('[HAX Helper] 初始化...');
+  console.log('[HAX Helper] 初始化 (v1.2, GM_cookie 模式)...');
   createUI();
 
   var toggle = document.getElementById('hax-toggle');
@@ -251,16 +275,24 @@
 
   toggle.addEventListener('click', function () {
     bodyEl.classList.toggle('open');
-    refreshData();
+    if (bodyEl.classList.contains('open')) {
+      refreshData().then(function () {
+        console.log('[HAX] Cookie 刷新完成');
+      });
+    }
   });
 
   // 复制按钮
   document.getElementById('hax-copy').addEventListener('click', function () {
-    copyToClipboard(document.getElementById('hax-output').textContent);
+    var text = document.getElementById('hax-output').textContent;
+    if (!text || text.includes('(未检测到')) { showStatus('⚠️ 先等数据加载完成', 'info'); return; }
+    copyToClipboard(text);
   });
   // 输出框点击也复制
   document.getElementById('hax-output').addEventListener('click', function () {
-    copyToClipboard(this.textContent);
+    var text = this.textContent;
+    if (!text || text.includes('(未检测到')) return;
+    copyToClipboard(text);
   });
 
   // 推送
