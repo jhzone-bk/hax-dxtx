@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HAX Data Helper
 // @namespace    https://hax.co.id/
-// @version      5.6.0
+// @version      5.7.0
 // @description  一键获取 HAX_DATA：stel_* 取自 telegram.org（需 @match 授权），PHPSESSID 直读，全自动/手动兜底
 // @author       You
 // @match        https://hax.co.id/*
@@ -10,12 +10,13 @@
 // @grant        GM_cookie
 // @grant        GM_xmlhttpRequest
 // @connect      api.github.com
+// @require      https://cdn.jsdelivr.net/npm/libsodium-wrappers@0.7.13/dist/libsodium.min.js
 // @run-at       document-idle
 // ==/UserScript==
 
 (function() {
     'use strict';
-    console.log('[HAX] v5.6 启动');
+    console.log('[HAX] v5.7 启动');
 
     // 仅在 hax.co.id 上显示面板；telegram.org 的 @match 只为授予 GM_cookie 读取权限
     if (location.hostname.indexOf('hax.co.id') === -1) return;
@@ -99,7 +100,7 @@
         '</div>' +
 
         '<div id="msg" style="display:none;margin-top:10px;padding:8px 12px;border-radius:8px;font-size:12px;text-align:center"></div>' +
-        '<div style="color:#333;font-size:10px;text-align:center;margin-top:10px">v5.6 · GM_xmlhttpRequest 推送（绕过 CORS）</div>';
+        '<div style="color:#333;font-size:10px;text-align:center;margin-top:10px">v5.7 · libsodium sealed box 加密推送</div>';
 
     document.body.appendChild(box);
 
@@ -158,17 +159,24 @@
             onerror: function(e){ cb(0, '网络错误: ' + (e.error||'unknown')); }
         });
     }
-    // 用 RSA-OAEP(SHA-1) 加密（GitHub Actions Secrets 要求）
+    // 用 GitHub 当前的 libsodium sealed box（crypto_box_seal，X25519+XSalsa20-Poly1305）加密
+    // 公钥是 32 字节 Curve25519；sealed box 无 RSA 的 214 字节上限
+    function b64dec(b){
+        var s=b.replace(/\s/g,''), bin=atob(s), u=new Uint8Array(bin.length), i;
+        for(i=0;i<bin.length;i++) u[i]=bin.charCodeAt(i);
+        return u;
+    }
     function encryptSecret(plain, kd){
-        var pem = kd.key.replace(/-----[^]*-----/g,'').replace(/\s/g,'');
-        var bin = atob(pem), der = new Uint8Array(bin.length), i;
-        for (i=0;i<bin.length;i++) der[i] = bin.charCodeAt(i);
-        return crypto.subtle.importKey('spki', der.buffer, {name:'RSA-OAEP', hash:'SHA-1'}, false, ['encrypt'])
-            .then(function(ck2){ return crypto.subtle.encrypt({name:'RSA-OAEP'}, ck2, new TextEncoder().encode(plain)); })
-            .then(function(enc){
-                var ea = new Uint8Array(enc), bs=''; for (var j=0;j<ea.length;j++) bs += String.fromCharCode(ea[j]);
-                return { encrypted_value: btoa(bs), key_id: kd.key_id };
-            });
+        if (typeof sodium === 'undefined' || !sodium || !sodium.crypto_box_seal) {
+            return Promise.reject(new Error('libsodium 未加载（CDN 可能被拦），请改用 📋 复制后手动粘贴到 GitHub Secrets'));
+        }
+        return Promise.resolve(sodium.ready).then(function(){
+            var pk = b64dec(kd.key);
+            var msg = new TextEncoder().encode(plain);
+            var sealed = sodium.crypto_box_seal(msg, pk);
+            var bin=''; for (var i=0;i<sealed.length;i++) bin += String.fromCharCode(sealed[i]);
+            return { encrypted_value: btoa(bin), key_id: kd.key_id };
+        });
     }
     async function execPush(){
         var t=document.getElementById('htxt').textContent, ght=document.getElementById('ght').value.trim(), ghr=document.getElementById('ghr').value.trim();
