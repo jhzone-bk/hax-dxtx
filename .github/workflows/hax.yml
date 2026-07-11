@@ -3,7 +3,7 @@ name: Hax Monitor
 on:
   workflow_dispatch:
   schedule:
-    - cron: "17 1 * * *"
+    - cron: "0 0 * * *"
 
 jobs:
   run:
