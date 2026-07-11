@@ -478,6 +478,20 @@ async function main() {
     await tgSendMessage(tgToken, tgChat, msg);
   }
 
+  // 页面数据解析失败告警（独立于 cookie 失效）
+  const noDataReports = reports.filter((r) => r.noData);
+  if (noDataReports.length) {
+    let msg = '⚠️ HAX 数据解析失败\n\n';
+    for (const r of noDataReports) {
+      msg += `账号 ${r.index + 1} 的 VPS 页面已获取，但未能解析到期日期（可能页面结构变化或 Cloudflare 闸门拦截）。\n`;
+      if (r.error) msg += `错误详情: ${r.error}\n`;
+    }
+    msg += '\n请检查 https://hax.co.id/vps-info/ 页面是否正常，或更新解析规则。';
+    log('\n[解析告警] 以下账号未能解析到到期数据：');
+    noDataReports.forEach((r) => log(`  账号 ${r.index + 1}`));
+    await tgSendMessage(tgToken, tgChat, msg);
+  }
+
   // Cookie 失效告警（独立于到期提醒，不受 2 天阈值限制）
   const expiredReports = reports.filter((r) => r.expired);
   if (expiredReports.length) {
@@ -492,6 +506,21 @@ async function main() {
           + '更新后脚本将恢复正常监控（下次定时任务生效）。';
     log('\n[Cookie告警] 检测到以下账号 Cookie 已失效：');
     expiredReports.forEach((r) => log(`  账号 ${r.index + 1}`));
+    await tgSendMessage(tgToken, tgChat, msg);
+  }
+
+  // 兜底：任何非成功账号且未被上述三类覆盖的，汇总告警
+  const otherFailures = reports.filter((r) => !r.ok && !r.expired && !r.noData);
+  if (otherFailures.length) {
+    let msg = '⚠️ HAX 监控异常\n\n';
+    for (const r of otherFailures) {
+      msg += `账号 ${r.index + 1} 监控异常`;
+      if (r.error) msg += `: ${r.error}`;
+      msg += '\n';
+    }
+    msg += `\n运行摘要: ${summary}\n\n请检查 GitHub Actions 日志排查原因。`;
+    log('\n[兜底告警] 其他异常账号：');
+    otherFailures.forEach((r) => log(`  账号 ${r.index + 1}: ${r.error || '未知'}`));
     await tgSendMessage(tgToken, tgChat, msg);
   }
 
