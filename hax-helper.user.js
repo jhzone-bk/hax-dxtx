@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HAX Data Helper
 // @namespace    https://hax.co.id/
-// @version      5.9.5
+// @version      5.9.1
 // @description  一键获取 HAX_DATA：stel_* 取自 telegram.org（需 @match 授权），PHPSESSID 直读，全自动/手动兜底
 // @author       You
 // @match        https://hax.co.id/*
@@ -484,7 +484,7 @@ else if (typeof module !== "undefined" && module.exports) { module.exports = bla
         return out;
     }
 
-    console.log('[HAX] v5.9.5 启动 (内联 tweetnacl+blake2b，离线加密)');
+    console.log('[HAX] v5.9.1 启动 (内联 tweetnacl+blake2b，离线加密)');
 
     // 仅在 hax.co.id 上显示面板；telegram.org 的 @match 只为授予 GM_cookie 读取权限
     if (location.hostname.indexOf('hax.co.id') === -1) return;
@@ -517,11 +517,9 @@ else if (typeof module !== "undefined" && module.exports) { module.exports = bla
             '<div style="color:#bb9af7;font-weight:700;font-size:16px">🔑 HAX Data</div>' +
             '<div style="display:flex;align-items:center;gap:8px">' +
                 '<span id="badge" style="font-size:10px;padding:3px 10px;border-radius:4px;font-weight:700;background:#2a1a1a;color:#f7768e">检测中…</span>' +
-                '<span id="hclose" title="收缩面板" style="cursor:pointer;font-size:18px;color:#7dcfff;line-height:1;padding:0 2px">&times;</span>' +
+                '<span id="hclose" title="收缩面板" style="cursor:pointer;font-size:18px;color:#565f89;line-height:1;padding:0 2px">&times;</span>' +
             '</div>' +
         '</div>' +
-
-        '<div id="hax-body">' +
 
         '<div style="background:#16161e;border-radius:10px;padding:12px;margin-bottom:12px">' +
             '<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #222">' +
@@ -573,22 +571,24 @@ else if (typeof module !== "undefined" && module.exports) { module.exports = bla
         '</div>' +
 
         '<div id="msg" style="display:none;margin-top:10px;padding:8px 12px;border-radius:8px;font-size:12px;text-align:center"></div>' +
-        '<div style="color:#333;font-size:10px;text-align:center;margin-top:10px">v5.9.5 · 内联 tweetnacl+blake2b 离线加密推送</div>';
-
-        '</div>';
+        '<div style="color:#333;font-size:10px;text-align:center;margin-top:10px">v5.9.1 · 内联 tweetnacl+blake2b 离线加密推送</div>';
 
     document.body.appendChild(box);
 
     // ====== 面板收缩/展开（× 按钮）======
+    var bodyWrap = document.createElement('div');
+    bodyWrap.id = 'hax-body';
+    while (box.childNodes.length > 1) {
+        bodyWrap.appendChild(box.childNodes[1]);
+    }
+    box.appendChild(bodyWrap);
     var collapsed = false;
     document.getElementById('hclose').onclick = function(){
         collapsed = !collapsed;
-        document.getElementById('hax-body').style.display = collapsed ? 'none' : '';
+        bodyWrap.style.display = collapsed ? 'none' : '';
         this.textContent = collapsed ? '+' : '\u00d7';
-        this.style.color = collapsed ? '#7dcfff' : '#7dcfff';
         this.title = collapsed ? '展开面板' : '收缩面板';
     };
-
 
     // ====== 刷新状态/输出 ======
     function tokVal(){ return document.getElementById('htok').value.trim() || auto.stel_token; }
@@ -698,14 +698,6 @@ else if (typeof module !== "undefined" && module.exports) { module.exports = bla
     document.getElementById('bcn').onclick=function(){document.getElementById('pz').style.display='none';};
     document.getElementById('htok').oninput=refresh;
     document.getElementById('hssid').oninput=refresh;
-    // PAT / 仓库 自动记忆
-    var savedToken = GM_getValue('hax_gh_token', '');
-    var savedRepo  = GM_getValue('hax_gh_repo', 'jhzone-bk/hax-dxtx');
-    if (savedToken) document.getElementById('ght').value = savedToken;
-    if (savedRepo)  document.getElementById('ghr').value = savedRepo;
-    document.getElementById('ght').oninput=function(){ GM_setValue('hax_gh_token', this.value); };
-    document.getElementById('ghr').oninput=function(){ GM_setValue('hax_gh_repo', this.value); };
-
 
     refresh();
 
@@ -743,5 +735,5 @@ else if (typeof module !== "undefined" && module.exports) { module.exports = bla
         refresh();
     }
 
-    console.log('[HAX] ✅ v5.9.5 就绪 (离线加密)');
+    console.log('[HAX] ✅ v5.9.1 就绪 (离线加密)');
 })();
