@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         HAX Data Helper
 // @namespace    https://hax.co.id/
-// @version      5.9.6
+// @version      5.9.7
 // @description  一键获取 HAX_DATA：stel_* 取自 telegram.org（需 @match 授权），PHPSESSID 直读，全自动/手动兜底
 // @author       You
 // @match        https://hax.co.id/*
@@ -9,6 +9,8 @@
 // @match        https://*.telegram.org/*
 // @grant        GM_cookie
 // @grant        GM_xmlhttpRequest
+// @grant        GM_setValue
+// @grant        GM_getValue
 // @connect      api.github.com
 // @run-at       document-idle
 // ==/UserScript==
@@ -484,7 +486,7 @@ else if (typeof module !== "undefined" && module.exports) { module.exports = bla
         return out;
     }
 
-    console.log('[HAX] v5.9.6 启动 (内联 tweetnacl+blake2b，离线加密)');
+    console.log('[HAX] v5.9.7 启动 (内联 tweetnacl+blake2b，离线加密)');
 
     // 仅在 hax.co.id 上显示面板；telegram.org 的 @match 只为授予 GM_cookie 读取权限
     if (location.hostname.indexOf('hax.co.id') === -1) return;
@@ -571,7 +573,7 @@ else if (typeof module !== "undefined" && module.exports) { module.exports = bla
         '</div>' +
 
         '<div id="msg" style="display:none;margin-top:10px;padding:8px 12px;border-radius:8px;font-size:12px;text-align:center"></div>' +
-        '<div style="color:#333;font-size:10px;text-align:center;margin-top:10px">v5.9.6 · 内联 tweetnacl+blake2b 离线加密推送</div>';
+        '<div style="color:#333;font-size:10px;text-align:center;margin-top:10px">v5.9.7 · 内联 tweetnacl+blake2b 离线加密推送</div>';
 
     document.body.appendChild(box);
 
@@ -742,5 +744,5 @@ else if (typeof module !== "undefined" && module.exports) { module.exports = bla
         refresh();
     }
 
-    console.log('[HAX] ✅ v5.9.6 就绪 (离线加密)');
+    console.log('[HAX] ✅ v5.9.7 就绪 (离线加密)');
 })();
